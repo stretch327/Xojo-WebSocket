@@ -1,36 +1,38 @@
 #tag Class
 Private Class Frame
 	#tag Method, Flags = &h0
-		Shared Function Decode(dataMB as MemoryBlock, byref offset as UInt64) As M_WebSocket.Frame()
-		  Dim frames() As M_WebSocket.Frame
-		  offset = 0
-		  While offset < dataMB.Size
+		Shared Function Decode(dataMB As MemoryBlock, ByRef remainder As String) As M_WebSocket.Frame()
+		  dim frames() as M_WebSocket.Frame
+		  
+		  dataMB.LittleEndian = False
+		  dim dataPtr as ptr = dataMB
+		  
+		  dim offset as integer
+		  
+		  while offset < dataMB.Size
 		    
-		    dataMB.LittleEndian = false
-		    Dim dataPtr As Ptr = dataMB
-		    
-		    Dim isFinal As Boolean = (dataPtr.Byte(offset) And &b10000000) <> 0
-		    Dim opCode As Integer = dataPtr.Byte(offset) And &b01111111
+		    dim isFinal as boolean = ( dataPtr.Byte( offset ) and &b10000000 ) <> 0
+		    dim opCode as Integer = dataPtr.Byte( offset ) and &b01111111
 		    dim type as Message.Types = Message.Types( opCode )
 		    
 		    if Message.ValidTypes.IndexOf( type ) = -1 then
 		      raise new WebSocketException( "Packet type is invalid" )
 		    end if
 		    
-		    Dim lenCode As Byte = dataPtr.Byte(offset + 1)
+		    dim lenCode as Byte = dataPtr.Byte( offset + 1 )
 		    dim masked as boolean = ( lenCode and &b10000000 ) <> 0
 		    lenCode = lenCode and &b01111111
 		    
 		    dim dataLen as UInt64
-		    Dim firstDataByte As Integer = offset + 2
+		    dim firstDataByte as Integer = offset + 2
 		    
 		    select case lenCode
 		    case 127
-		      dataLen = dataMB.UInt64Value(offset + 2)
+		      dataLen = dataMB.UInt64Value( offset + 2 )
 		      firstDataByte = firstDataByte + 8
 		      
-		    Case 126
-		      dataLen = dataMB.UInt16Value(offset + 2)
+		    case 126
+		      dataLen = dataMB.UInt16Value( offset + 2 )
 		      firstDataByte = firstDataByte + 2
 		      
 		    case else
@@ -38,16 +40,16 @@ Private Class Frame
 		      
 		    end select
 		    
-		    Dim lastDataByte As Integer = firstDataByte + dataLen
+		    dim lastDataByte as Integer = firstDataByte + dataLen
 		    
 		    if masked and dataLen > 0 then
 		      dim maskMB as MemoryBlock = dataMB.StringValue( firstDataByte, 4 )
-		      dim maskPtr as Ptr = maskMB
+		      dim maskPtr as ptr = maskMB
 		      
 		      firstDataByte = firstDataByte + 4
 		      
-		      dim maskIndex as integer
-		      for i as integer = firstDataByte to lastDataByte
+		      dim maskIndex as Integer
+		      for i as Integer = firstDataByte to lastDataByte
 		        dataPtr.Byte( i ) = dataPtr.Byte( i ) xor maskPtr.Byte( maskIndex )
 		        
 		        maskIndex = maskIndex + 1
@@ -55,14 +57,29 @@ Private Class Frame
 		          maskIndex = 0
 		        end if
 		      next
-		    End If
+		    end if
 		    
-		    Dim data As String
-		    Try
-		      data = If(dataLen > 0, dataMB.StringValue(firstDataByte, lastDataByte - firstDataByte), "")
-		    Catch ex As OutOfBoundsException
-		      Exit While
-		    End Try
+		    dim data as String
+		    if dataLen = 0 then
+		      data = ""
+		    else
+		      dim requiredDataLen as integer = lastDataByte - firstDataByte
+		      dim remainingDataLen as integer = dataMB.Size - firstDataByte
+		      
+		      if remainingDataLen < requiredDataLen then
+		        //
+		        // Not enough data left
+		        //
+		        if DebugBuild then
+		          System.DebugLog "Partial Packet: " + format( requiredDataLen, "#,0" ) + " bytes required, " +_
+		          format( remainingDataLen, "#,0" ) + " bytes available"
+		        end if
+		        
+		        exit while
+		      end if
+		      
+		      data = dataMB.StringValue( firstDataByte, requiredDataLen )
+		    end if
 		    
 		    if isFinal and type = Message.Types.Text then
 		      //
@@ -74,19 +91,28 @@ Private Class Frame
 		      data = data.DefineEncoding( Encodings.UTF8 )
 		    end if
 		    
-		    Dim r As New M_WebSocket.Frame
+		    dim r as new M_WebSocket.Frame
 		    
-		    r.IsFinal = isFinal
-		    r.Type = type
+		    r.isFinal = isFinal
+		    r.type = type
 		    r.IsMasked = masked
 		    r.Content = data
 		    
 		    frames.Append r
 		    
 		    offset = lastDataByte
-		  Wend
+		  wend
 		  
-		  Return frames
+		  //
+		  // Set the remainder
+		  //
+		  if offset < dataMB.Size then
+		    remainder = dataMB.StringValue( offset, dataMB.Size - offset )
+		  else
+		    remainder = ""
+		  end if
+		  
+		  return frames
 		End Function
 	#tag EndMethod
 
@@ -192,6 +218,7 @@ Private Class Frame
 			Name="Content"
 			Group="Behavior"
 			Type="String"
+			EditorType="MultiLineEditor"
 		#tag EndViewProperty
 		#tag ViewProperty
 			Name="Index"
@@ -241,6 +268,7 @@ Private Class Frame
 			Name="ToString"
 			Group="Behavior"
 			Type="String"
+			EditorType="MultiLineEditor"
 		#tag EndViewProperty
 	#tag EndViewBehavior
 End Class
